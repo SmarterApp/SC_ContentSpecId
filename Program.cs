@@ -30,8 +30,9 @@ namespace UnitTest
 
                 Console.WriteLine($"Working directory: {s_workingDirectory}");
 
-                //TestLegacyFormatIds(Path.Combine(s_workingDirectory, c_legacyIdFilename));
-                TestEnhancedFormatIds(Path.Combine(s_workingDirectory, c_enhancedIdFilename));
+                TestLegacyFormatIds(Path.Combine(s_workingDirectory, c_legacyIdFilename));
+                //TestEnhancedFormatIds(Path.Combine(s_workingDirectory, c_enhancedIdFilename));
+                //TestEnhancedFormatIds(Path.Combine(s_workingDirectory, "AllEnhancedMathIds.txt"));
             }
             catch (Exception err)
             {
@@ -68,46 +69,8 @@ namespace UnitTest
 
                     ++idCount;
 
-                    // Parse the grade and ID and check for errors
-                    var grade = ContentSpecId.ParseGrade(strGrade);
-                    var id = ContentSpecId.TryParse(strId, grade);
-                    if (id.ParseErrorSeverity != ErrorSeverity.NoError)
-                    {
-                        // Report a parse error
-                        Console.WriteLine(line);
-                        var save = Console.ForegroundColor;
-                        Console.ForegroundColor = (id.ParseErrorSeverity == ErrorSeverity.Corrected)
-                            ? ConsoleColor.Green
-                            : ConsoleColor.Red;
-                        Console.WriteLine($"   {id.ParseErrorDescription}");
-                        Console.ForegroundColor = save;
+                    if (!TestLegacyFormatId(strGrade, strId))
                         ++errorCount;
-                    }
-                    else if (id.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
-                    {
-                        // Report a validation error
-                        Console.WriteLine(line);
-                        var save = Console.ForegroundColor;
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"   {id.ValidationErrorDescription}");
-                        Console.ForegroundColor = save;
-                        ++errorCount;
-                    }
-                    else
-                    {
-                        // Check for round-trip match
-                        string roundTrip = id.ToString();
-                        string compId = RemedyMissingGrade(strId, grade);
-                        if (!string.Equals(compId, roundTrip, StringComparison.OrdinalIgnoreCase))
-                        {
-                            Console.WriteLine(line);
-                            var save = Console.ForegroundColor;
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine($"   ID doesn't match: {roundTrip}");
-                            Console.ForegroundColor = save;
-                            ++errorCount;
-                        }
-                    }
                 }
             }
 
@@ -117,6 +80,93 @@ namespace UnitTest
             Console.WriteLine();
 
             return errorCount == 0;
+        }
+
+        static bool TestLegacyFormatId(string strGrade, string strId)
+        {
+            try
+            {
+                // Parse the grade and ID and check for errors
+                var grade = ContentSpecId.ParseGrade(strGrade);
+                var id = ContentSpecId.TryParse(strId, grade);
+                if (id.ParseErrorSeverity != ErrorSeverity.NoError)
+                {
+                    // Report a parse error
+                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(id.ParseErrorSeverity == ErrorSeverity.Corrected ? ConsoleColor.Green : ConsoleColor.Red,
+                        $"   {id.ParseErrorDescription}");
+                    return false;
+                }
+
+                // Check for format-ability
+                if (id.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
+                {
+                    // Report a validation error
+                    WriteLine(ConsoleColor.Red, $"   {id.ValidationErrorDescription}");
+                    return false;
+                }
+
+                // Check for round-trip match
+                string roundTrip = id.ToString();
+                string compId = RemedyMissingGrade(strId, grade);
+                if (!string.Equals(compId, roundTrip, StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(ConsoleColor.Red, $"   ID doesn't match: {roundTrip}");
+                    return false;
+                }
+
+                // See if can be reformatted to enhanced
+                if (id.ValidateFor(ContentSpecIdFormat.Enhanced) != ErrorSeverity.NoError)
+                {
+                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(ConsoleColor.Red, $"   Cannot convert to enhanced format: {id.ValidationErrorDescription}");
+                    return false;
+                }
+
+                // Round-trip through Enhanced ID format
+                var enhancedIdStr = id.ToString(ContentSpecIdFormat.Enhanced);
+                var enhancedId = ContentSpecId.TryParse(enhancedIdStr);
+                if (!enhancedId.ParseSucceeded)
+                {
+                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Failed to parse enhanced format: {enhancedId.ParseErrorDescription}");
+                    return false;
+                }
+
+                if (!id.Equals(enhancedId))
+                {
+                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Enhanced ID conversion is not equal.");
+                    return false;
+                }
+
+                if (enhancedId.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
+                {
+                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Cannot format enhanced to original format: ${enhancedId.ValidationErrorDescription}");
+                    return false;
+                }
+
+                roundTrip = enhancedId.ToString(id.ParseFormat);
+                if (!string.Equals(compId, roundTrip, StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   ID doesn't match when round-tripped through enahcned ID: {roundTrip}");
+                    return false;
+                }
+            }
+            catch (Exception err)
+            {
+                WriteLine(ConsoleColor.Red, $"{strGrade} {strId}");
+                throw;
+            }
+
+            return true;
         }
 
         static bool TestEnhancedFormatIds(string path)
@@ -550,9 +600,22 @@ namespace UnitTest
                 Console.WriteLine(" },");
             }
         }
+
+        static void WriteLine(string text)
+        {
+            Console.WriteLine(text);
+        }
+
+        static void WriteLine(ConsoleColor color, string text)
+        {
+            var save = Console.ForegroundColor;
+            Console.ForegroundColor = color;
+            Console.WriteLine(text);
+            Console.ForegroundColor = save;
+        }
     }
 
-    internal static class CounterHelp
+    internal static class ClassHelp
     {
         public static void Increment(this Dictionary<string, int> dict, string key)
         {
@@ -599,6 +662,5 @@ namespace UnitTest
                 writer.WriteLine("{0,6}: {1}", pair.Value, pair.Key);
             }
         }
-
     }
 }

@@ -60,7 +60,7 @@ namespace SmarterApp
         Invalid = 2     // The identifier is invalid and cannot be corrected
     }
 
-    public class ContentSpecId
+    public class ContentSpecId : IComparable, IComparable<ContentSpecId>, IEquatable<ContentSpecId>
     {
         const string c_Main = "m";
         const string c_AdditionalSupporting = "a/s";
@@ -716,7 +716,7 @@ namespace SmarterApp
                     id.TrySetCcss(string.Join('.', parts, 4, parts.Length - 4));
                 }
 
-                id.ValidateDomain(domain);
+                id.TrySetDomain(domain);
             }
 
             else
@@ -1090,6 +1090,47 @@ namespace SmarterApp
             return true;
         }
 
+        bool TrySetDomain(string domain)
+        {
+            if (string.IsNullOrEmpty(domain)
+                || domain.Equals(c_NotApplicable, StringComparison.Ordinal))
+            {
+                m_domain = null;
+                return true;
+            }
+
+            // If no target has been set (typically a truncated new-format ID) then just keep the specified domain
+            if (string.IsNullOrEmpty(m_target))
+            {
+                m_domain = domain;
+            }
+
+            // If Math claim 2-4 accept the inbound domain (it's from an associated Claim 1 ID)
+            if (m_subject == ContentSpecSubject.Math && m_claim != ContentSpecClaim.C1)
+            {
+                m_domain = domain;
+                return true;
+            }
+
+            m_domain = null;
+            var expectedDomain = Domain;
+
+            // If domain cannot be derived, then set the value
+            if (string.IsNullOrEmpty(expectedDomain))
+            {
+                m_domain = domain;
+                return true;
+            }
+
+            // Otherwise, check that the value is what we expect it to be.
+            if (!string.Equals(domain, expectedDomain, StringComparison.Ordinal))
+            {
+                AppendParseError(ErrorSeverity.Corrected, $"Incorrect domain in parsed ID. Found '{domain}', expected '{expectedDomain}'.");
+                return false;
+            }
+            return true;
+        }
+
         bool TrySetLegacyDomain(string legacyDomain)
         {
             if (string.IsNullOrEmpty(legacyDomain)
@@ -1099,6 +1140,7 @@ namespace SmarterApp
                 return true;
             }
 
+            // If Math claim 2-4 accept the inbound domain (it's from an associated Claim 1 ID)
             if (m_subject == ContentSpecSubject.Math && m_claim != ContentSpecClaim.C1)
             {
                 m_domain = legacyDomain;
@@ -1171,22 +1213,6 @@ namespace SmarterApp
                 {
                     AppendParseError(ErrorSeverity.Corrected, $"Incorrect emphasis in parsed ID. Found '{emphasis}', expected '{LegacyEmphasis}'.");
                 }
-                return false;
-            }
-            return true;
-        }
-
-        bool ValidateDomain(string domain)
-        {
-            // If no target has been set (typically a truncated new-format ID) then just keep the specified domain
-            if (string.IsNullOrEmpty(m_target))
-            {
-                m_domain = domain;
-            }
-
-            if (!string.Equals(domain, Domain.ToString(), StringComparison.Ordinal))
-            {
-                AppendParseError(ErrorSeverity.Corrected, $"Incorrect domain in parsed ID. Found '{domain}', expected '{Domain}'.");
                 return false;
             }
             return true;
@@ -1368,6 +1394,65 @@ namespace SmarterApp
             return (domain == D.UNK) ? string.Empty : domain.ToString();
         }
 
+        #endregion Derived Properties
+
+        #region Collection-Friendliness
+
+        public override int GetHashCode()
+        {
+            int result = (int)m_subject
+                ^ (int)m_grade
+                ^ (int)m_claim;
+            if (m_target != null)
+                result ^= m_target.GetHashCode();
+            if (m_ccss != null)
+                result ^= m_ccss.GetHashCode();
+            return result;
+        }
+
+        public int CompareTo(ContentSpecId other)
+        {
+            int result = (int)m_subject - (int)other.m_subject;
+            if (result != 0) return result;
+
+            result = (int)m_grade - (int)other.m_grade;
+            if (result != 0) return result;
+
+            result = (int)m_claim - (int)other.m_claim;
+            if (result != 0) return result;
+
+            result = string.CompareOrdinal(m_target, other.m_target);
+            if (result != 0) return result;
+
+            result = string.CompareOrdinal(m_ccss, other.m_ccss);
+            if (result != 0) return result;
+
+            return string.CompareOrdinal(m_domain, other.m_domain);
+        }
+
+        public bool Equals(ContentSpecId other)
+        {
+            return CompareTo(other) == 0;
+        }
+
+        public int CompareTo(object obj)
+        {
+            ContentSpecId other = obj as ContentSpecId;
+            if (other == null) return -1;
+            return CompareTo(other);
+        }
+
+        public override bool Equals(object obj)
+        {
+            ContentSpecId other = obj as ContentSpecId;
+            if (other == null) return false;
+            return CompareTo(other) == 0;
+        }
+
+        #endregion Collection-Friendliness
+
+        #region Static Parsing Methods
+
         const int c_maxElaTarget = 14;
 
         /// <summary>
@@ -1441,7 +1526,7 @@ namespace SmarterApp
             return value;
         }
 
-        #endregion Derived Properties
+        #endregion Static Parsing Methods
 
         #region Standard Targets and Domains plus Lookup Tables
 
