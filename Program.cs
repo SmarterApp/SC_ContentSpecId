@@ -31,8 +31,8 @@ namespace UnitTest
                 Console.WriteLine($"Working directory: {s_workingDirectory}");
 
                 TestLegacyFormatIds(Path.Combine(s_workingDirectory, c_legacyIdFilename));
-                //TestEnhancedFormatIds(Path.Combine(s_workingDirectory, c_enhancedIdFilename));
-                //TestEnhancedFormatIds(Path.Combine(s_workingDirectory, "AllEnhancedMathIds.txt"));
+                TestEnhancedFormatIds(Path.Combine(s_workingDirectory, c_enhancedIdFilename));
+                TestEnhancedFormatIds(Path.Combine(s_workingDirectory, "AllEnhancedMathIds.txt"));
             }
             catch (Exception err)
             {
@@ -160,7 +160,7 @@ namespace UnitTest
                     return false;
                 }
             }
-            catch (Exception err)
+            catch (Exception)
             {
                 WriteLine(ConsoleColor.Red, $"{strGrade} {strId}");
                 throw;
@@ -185,44 +185,8 @@ namespace UnitTest
 
                     ++idCount;
 
-                    // Parse the ID and check for errors
-                    var id = ContentSpecId.TryParse(line);
-                    if (id.ParseErrorSeverity != ErrorSeverity.NoError)
-                    {
-                        // Report a parse error
-                        Console.WriteLine(line);
-                        var save = Console.ForegroundColor;
-                        Console.ForegroundColor = (id.ParseErrorSeverity == ErrorSeverity.Corrected)
-                            ? ConsoleColor.Green
-                            : ConsoleColor.Red;
-                        Console.WriteLine($"   {id.ParseErrorDescription}");
-                        Console.ForegroundColor = save;
+                    if (!TestEnhancedFormatId(line))
                         ++errorCount;
-                    }
-                    else if (id.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
-                    {
-                        // Report a validation error
-                        Console.WriteLine(line);
-                        var save = Console.ForegroundColor;
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"   {id.ValidationErrorDescription}");
-                        Console.ForegroundColor = save;
-                        ++errorCount;
-                    }
-                    else
-                    {
-                        // Check for round-trip match
-                        string roundTrip = id.ToString();
-                        if (!string.Equals(line, roundTrip, StringComparison.OrdinalIgnoreCase))
-                        {
-                            Console.WriteLine(line);
-                            var save = Console.ForegroundColor;
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine($"   ID doesn't match: {roundTrip}");
-                            Console.ForegroundColor = save;
-                            ++errorCount;
-                        }
-                    }
                 }
             }
 
@@ -232,6 +196,101 @@ namespace UnitTest
             Console.WriteLine();
 
             return errorCount == 0;
+        }
+
+        static bool TestEnhancedFormatId(string idStr)
+        {
+            try
+            {
+                // Parse the ID and check for errors
+                var id = ContentSpecId.TryParse(idStr);
+                if (id.ParseErrorSeverity != ErrorSeverity.NoError)
+                {
+                    // Report a parse error
+                    WriteLine(idStr);
+                    WriteLine(id.ParseErrorSeverity == ErrorSeverity.Corrected ? ConsoleColor.Green : ConsoleColor.Red,
+                        $"   {id.ParseErrorDescription}");
+                    return false;
+                }
+
+                if (id.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
+                {
+                    // Report a validation error
+                    WriteLine(idStr);
+                    WriteLine(ConsoleColor.Red, $"   {id.ValidationErrorDescription}");
+                    return false;
+                }
+
+                // Check for round-trip match
+                string roundTrip = id.ToString();
+                if (!string.Equals(idStr, roundTrip, StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteLine(idStr);
+                    WriteLine(ConsoleColor.Red, $"   ID doesn't match: {roundTrip}");
+                    return false;
+                }
+
+                // If claim or target is not specfied then it cannot be converted to
+                // legacy format. Do not perform the test.
+                if (id.Claim == ContentSpecClaim.Unspecified || string.IsNullOrEmpty(id.Target))
+                    return true;
+
+                // Pick legacy format according to subject
+                var legacyFormat = id.Subject == ContentSpecSubject.Math
+                    ? ContentSpecIdFormat.MathV4
+                    : ContentSpecIdFormat.ElaV1;
+
+                // See if can be reformatted to enhanced
+                if (id.ValidateFor(legacyFormat) != ErrorSeverity.NoError)
+                {
+                    WriteLine(idStr);
+                    WriteLine(ConsoleColor.Red, $"   Cannot convert to legacy format: {id.ValidationErrorDescription}");
+                    return false;
+                }
+
+                // Round-trip through Legacy format
+                var legacyIdStr = id.ToString(legacyFormat);
+                var legacyId = ContentSpecId.TryParse(legacyIdStr);
+                if (!legacyId.ParseSucceeded)
+                {
+                    WriteLine(idStr);
+                    WriteLine(ConsoleColor.Red, $"   {legacyIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Failed to parse enhanced format: {legacyId.ParseErrorDescription}");
+                    return false;
+                }
+
+                if (!id.Equals(legacyId))
+                {
+                    WriteLine(idStr);
+                    WriteLine(ConsoleColor.Red, $"   {legacyIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Enhanced ID conversion is not equal.");
+                    return false;
+                }
+
+                if (legacyId.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
+                {
+                    WriteLine(idStr);
+                    WriteLine(ConsoleColor.Red, $"   {legacyIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Cannot format enhanced to original format: ${legacyId.ValidationErrorDescription}");
+                    return false;
+                }
+
+                roundTrip = legacyId.ToString(id.ParseFormat);
+                if (!string.Equals(idStr, roundTrip, StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteLine(idStr);
+                    WriteLine(ConsoleColor.Red, $"   {legacyIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   ID doesn't match when round-tripped through enahcned ID: {roundTrip}");
+                    return false;
+                }
+            }
+            catch (Exception)
+            {
+                WriteLine(ConsoleColor.Red, idStr);
+                throw;
+            }
+
+            return true;
         }
 
         static void ExtractIdsFromCASE(string inputPath, string outputPath)
