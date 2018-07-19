@@ -8,7 +8,8 @@ namespace UnitTest
 {
     class Program
     {
-        const string c_legacyIdFilename = "AllLegacyIds.txt";
+        const string c_legacyIdFilename = "AllLegacyIdsInUse.txt";
+        const string c_enhancedIdFilename = "AllEnhancedElaIds.txt";
 
         static string s_workingDirectory;
 
@@ -29,8 +30,8 @@ namespace UnitTest
 
                 Console.WriteLine($"Working directory: {s_workingDirectory}");
 
-                TestAllLegacyIds();
-                //DumpEmphasis();
+                //TestLegacyFormatIds(Path.Combine(s_workingDirectory, c_legacyIdFilename));
+                TestEnhancedFormatIds(Path.Combine(s_workingDirectory, c_enhancedIdFilename));
             }
             catch (Exception err)
             {
@@ -45,54 +46,164 @@ namespace UnitTest
 #endif
         }
 
-        static void TestAllLegacyIds()
+        static bool TestLegacyFormatIds(string path)
         {
-            using (var idFile = new StreamReader(Path.Combine(s_workingDirectory, c_legacyIdFilename)))
+            Console.WriteLine($"Testing legacy IDs in '{path}'.");
+
+            int idCount = 0;
+            int errorCount = 0;
+            using (var idFile = new StreamReader(path))
             {
                 for (; ; )
                 {
+                    // Read grade and ID
                     string line = idFile.ReadLine();
                     if (line == null) break;
-                    Console.WriteLine(line);
 
+                    // Separate the grade and ID fields
                     int space = line.IndexOf(' ');
                     if (space < 0) continue;
                     string strGrade = line.Substring(0, space);
                     string strId = line.Substring(space + 1);
+
+                    ++idCount;
+
+                    // Parse the grade and ID and check for errors
                     var grade = ContentSpecId.ParseGrade(strGrade);
                     var id = ContentSpecId.TryParse(strId, grade);
                     if (id.ParseErrorSeverity != ErrorSeverity.NoError)
                     {
+                        // Report a parse error
+                        Console.WriteLine(line);
                         var save = Console.ForegroundColor;
                         Console.ForegroundColor = (id.ParseErrorSeverity == ErrorSeverity.Corrected)
                             ? ConsoleColor.Green
                             : ConsoleColor.Red;
                         Console.WriteLine($"   {id.ParseErrorDescription}");
                         Console.ForegroundColor = save;
+                        ++errorCount;
                     }
                     else if (id.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
                     {
+                        // Report a validation error
+                        Console.WriteLine(line);
                         var save = Console.ForegroundColor;
                         Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine($"   {id.ValidationErrorDescription}");
                         Console.ForegroundColor = save;
+                        ++errorCount;
                     }
                     else
                     {
+                        // Check for round-trip match
                         string roundTrip = id.ToString();
                         string compId = RemedyMissingGrade(strId, grade);
                         if (!string.Equals(compId, roundTrip, StringComparison.OrdinalIgnoreCase))
                         {
+                            Console.WriteLine(line);
                             var save = Console.ForegroundColor;
                             Console.ForegroundColor = ConsoleColor.Red;
                             Console.WriteLine($"   ID doesn't match: {roundTrip}");
                             Console.ForegroundColor = save;
+                            ++errorCount;
                         }
                     }
                 }
             }
+
+            // Report results
+            Console.WriteLine($"{idCount,4} Ids Tested");
+            Console.WriteLine($"{errorCount,4} Errors Reported");
+            Console.WriteLine();
+
+            return errorCount == 0;
         }
 
+        static bool TestEnhancedFormatIds(string path)
+        {
+            Console.WriteLine($"Testing enhanced IDs in '{path}'.");
+
+            int idCount = 0;
+            int errorCount = 0;
+            using (var idFile = new StreamReader(path))
+            {
+                for (; ; )
+                {
+                    // Read ID
+                    string line = idFile.ReadLine();
+                    if (line == null) break;
+
+                    ++idCount;
+
+                    // Parse the ID and check for errors
+                    var id = ContentSpecId.TryParse(line);
+                    if (id.ParseErrorSeverity != ErrorSeverity.NoError)
+                    {
+                        // Report a parse error
+                        Console.WriteLine(line);
+                        var save = Console.ForegroundColor;
+                        Console.ForegroundColor = (id.ParseErrorSeverity == ErrorSeverity.Corrected)
+                            ? ConsoleColor.Green
+                            : ConsoleColor.Red;
+                        Console.WriteLine($"   {id.ParseErrorDescription}");
+                        Console.ForegroundColor = save;
+                        ++errorCount;
+                    }
+                    else if (id.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
+                    {
+                        // Report a validation error
+                        Console.WriteLine(line);
+                        var save = Console.ForegroundColor;
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"   {id.ValidationErrorDescription}");
+                        Console.ForegroundColor = save;
+                        ++errorCount;
+                    }
+                    else
+                    {
+                        // Check for round-trip match
+                        string roundTrip = id.ToString();
+                        if (!string.Equals(line, roundTrip, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Console.WriteLine(line);
+                            var save = Console.ForegroundColor;
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"   ID doesn't match: {roundTrip}");
+                            Console.ForegroundColor = save;
+                            ++errorCount;
+                        }
+                    }
+                }
+            }
+
+            // Report results
+            Console.WriteLine($"{idCount,4} Ids Tested");
+            Console.WriteLine($"{errorCount,4} Errors Reported");
+            Console.WriteLine();
+
+            return errorCount == 0;
+        }
+
+        static void ExtractIdsFromCASE(string inputPath, string outputPath)
+        {
+            // Read input from JSON into XML
+            System.Xml.XPath.XPathDocument doc;
+            using (var stream = new FileStream(inputPath, FileMode.Open, FileAccess.Read))
+            {
+                using (var reader = System.Runtime.Serialization.Json.JsonReaderWriterFactory.CreateJsonReader(stream, new System.Xml.XmlDictionaryReaderQuotas()))
+                {
+                    doc = new System.Xml.XPath.XPathDocument(reader);
+                }
+            }
+
+            using (var writer = new StreamWriter(outputPath, false, System.Text.Encoding.UTF8))
+            {
+                foreach (System.Xml.XPath.XPathNavigator node in doc.CreateNavigator().Select("//humanCodingScheme"))
+                {
+                    writer.WriteLine(node.Value);
+                }
+            }
+        }
 
         // Legacy IDs frequently are missing the grade. This method adds the grade back
         // so that we can compare it with the round-tripped identifier.

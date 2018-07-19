@@ -677,9 +677,10 @@ namespace SmarterApp
             // Enhanced format
             else if (value[0] == 'E' || value[0] == 'M')
             {
+                id.m_parseFormat = ContentSpecIdFormat.Enhanced;
                 string[] parts = value.Split('.');
 
-                id.TrySetSubject(parts[0].Substring(1));
+                id.TrySetSubject(parts[0]);
 
                 if (parts.Length > 1)
                 {
@@ -1177,6 +1178,12 @@ namespace SmarterApp
 
         bool ValidateDomain(string domain)
         {
+            // If no target has been set (typically a truncated new-format ID) then just keep the specified domain
+            if (string.IsNullOrEmpty(m_target))
+            {
+                m_domain = domain;
+            }
+
             if (!string.Equals(domain, Domain.ToString(), StringComparison.Ordinal))
             {
                 AppendParseError(ErrorSeverity.Corrected, $"Incorrect domain in parsed ID. Found '{domain}', expected '{Domain}'.");
@@ -1254,7 +1261,7 @@ namespace SmarterApp
 
                     if (!string.IsNullOrEmpty(m_target))
                     {
-                        v.Append('.');
+                        v.Append(".T");
                         v.Append(m_target);
 
                         if (!string.IsNullOrEmpty(m_ccss))
