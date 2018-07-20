@@ -1642,8 +1642,8 @@ namespace SmarterApp
 
         static bool[] s_MathEmphasisHighSchool = new bool[]
         {
-        //    A      B     C     D     E      F      G     H     I     J     K     L     M     N     O     P
-            false, false, true, true, true, false, false, true, true, true, true, true, true, true, true, true
+        //    A      B      C     D     E     F     G     H     I     J     K     L     M     N      O      P
+            false, false, false, true, true, true, true, true, true, true, true, true, true, true, false, false
         };
 
         const int c_MathTargetSetGradeMin = 3;
