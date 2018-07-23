@@ -1,4 +1,50 @@
-﻿using System;
+﻿/*
+---
+name: ContentSpecId.cs
+description: Class for Constructing, Parsing, and Converting Smarter Balanced Content Specification IDs
+url: https://raw.githubusercontent.com/SmarterApp/SC_ContentSpecId/master/ContentSpecId.cs
+version: 1.0
+keywords: CodeBit
+dateModified: 2018-07-23
+license: https://opensource.org/licenses/ECL-2.0
+# This is a CodeBit; see https://www.filemeta.org/CodeBit.html
+# Metadata in Yaml format using Schema.org properties. See https://schema.org.
+...
+*/
+
+/*
+Copyright 2018 Regents of the University of California.
+
+Licensed under the Educational Community License, Version 2.0
+(the "License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+https://opensource.org/licenses/ECL-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an "AS IS"
+BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+or implied. See the License for the specific language governing
+permissions and limitations under the License.
+*/
+
+/*
+See http://www.smarterapp.org/documents/ContentSpecificationIdFormats.pdf for
+details about Content Specification Identifiers in Enhanced and Legacy formats including
+definitions of all properties.
+
+This class may be used to represent a content specficiation identifier, to
+generate IDs in Ehanced or Legacy formats, and to parse IDs in both formats.
+
+The primary properties of a Smarter Balanced Content Specification
+Identifier are Subject, Grade, Claim, and Target. Domain is also
+frequently used but may be derived from the other attributes.
+Legacy identifiers in certain formats include Emphasis, Target Set,
+and Content Category properties all of which can be derived from
+the primary properties.
+*/
+
+using System;
 using System.Text;
 
 namespace SmarterApp
@@ -60,6 +106,25 @@ namespace SmarterApp
         Invalid = 2     // The identifier is invalid and cannot be corrected
     }
 
+    /// <summary>
+    /// Represents a Smarter Balanced Content Specification Identifier
+    /// </summary>
+    /// <remarks>
+    /// <para>See http://www.smarterapp.org/documents/ContentSpecificationIdFormats.pdf for
+    /// details about Content Specification Identifiers in Enhanced and Legacy formats including
+    /// definitions of all properties.
+    /// </para>
+    /// <para>This class may be used to represent a content specficiation identifier, to
+    /// generate IDs in Ehanced or Legacy formats, and to parse IDs in both formats.
+    /// </para>
+    /// <para>The primary properties of a Smarter Balanced Content Specification
+    /// Identifier are Subject, Grade, Claim, and Target. Domain is also
+    /// frequently used but may be derived from the other attributes.
+    /// Legacy identifiers in certain formats include Emphasis, Target Set,
+    /// and Content Category properties all of which can be derived from
+    /// the primary properties.
+    /// </para>
+    /// </remarks>
     public class ContentSpecId : IComparable, IComparable<ContentSpecId>, IEquatable<ContentSpecId>
     {
         const string c_Main = "m";
