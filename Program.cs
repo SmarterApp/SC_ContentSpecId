@@ -8,8 +8,14 @@ namespace UnitTest
 {
     class Program
     {
-        const string c_legacyIdFilename = "AllLegacyIdsInUse.txt";
-        const string c_enhancedIdFilename = "AllEnhancedElaIds.txt";
+        static string[] s_testFileNames = new string[]
+        {
+            "LegacyIdsInUse.txt",
+            "ElaLegacyIdsFromCoreStandards.txt",
+            "MathLegacyIdsFromCoreStandards.txt",
+            "ElaEnhancedIdsFromCASE.txt",
+            "MathEnhancedIdsFromCASE.txt"
+        };
 
         static string s_workingDirectory;
 
@@ -19,20 +25,22 @@ namespace UnitTest
             {
                 // Locate the working directory in the parent path of the directory containing the executable
                 s_workingDirectory = Path.GetFullPath(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location));
-                while (!File.Exists(Path.Combine(s_workingDirectory, c_legacyIdFilename)))
+                while (!File.Exists(Path.Combine(s_workingDirectory, s_testFileNames[0])))
                 {
                     s_workingDirectory = Path.GetDirectoryName(s_workingDirectory);
                     if (s_workingDirectory == null)
                     {
-                        throw new ApplicationException($"Unable to find working directory containing '{c_legacyIdFilename}' in the parent path of the executable '{Assembly.GetEntryAssembly().Location}'.");
+                        throw new ApplicationException($"Unable to find working directory containing '{s_testFileNames[0]}' in the parent path of the executable '{Assembly.GetEntryAssembly().Location}'.");
                     }
                 }
 
                 Console.WriteLine($"Working directory: {s_workingDirectory}");
 
-                TestLegacyFormatIds(Path.Combine(s_workingDirectory, c_legacyIdFilename));
-                TestEnhancedFormatIds(Path.Combine(s_workingDirectory, c_enhancedIdFilename));
-                TestEnhancedFormatIds(Path.Combine(s_workingDirectory, "AllEnhancedMathIds.txt"));
+                foreach(string filename in s_testFileNames)
+                {
+                    TestIdList(Path.Combine(s_workingDirectory, filename));
+                }
+
             }
             catch (Exception err)
             {
@@ -47,126 +55,191 @@ namespace UnitTest
 #endif
         }
 
-        static bool TestLegacyFormatIds(string path)
+        static bool TestIdList(string path)
         {
-            Console.WriteLine($"Testing legacy IDs in '{path}'.");
+            Console.WriteLine($"Testing IDs in '{path}'.");
 
             int idCount = 0;
             int errorCount = 0;
+            int legacyFormatCount = 0;
+            int enhancedFormatCount = 0;
             using (var idFile = new StreamReader(path))
             {
                 for (; ; )
                 {
-                    // Read grade and ID
+                    // Read one input line
                     string line = idFile.ReadLine();
                     if (line == null) break;
+                    line = line.Trim();
+                    if (line.Length == 0) continue;
 
-                    // Separate the grade and ID fields
+                    // Separate the grade field if present
+                    var grade = ContentSpecGrade.Unspecified;
                     int space = line.IndexOf(' ');
-                    if (space < 0) continue;
-                    string strGrade = line.Substring(0, space);
-                    string strId = line.Substring(space + 1);
+                    if (space > 0)
+                    {
+                        grade = ContentSpecId.ParseGrade(line.Substring(0, space));
+                        line = line.Substring(space + 1);
+                    }
 
                     ++idCount;
 
-                    if (!TestLegacyFormatId(strGrade, strId))
-                        ++errorCount;
+                    switch (TestId(line, grade))
+                    {
+                        case ContentSpecIdFormat.Enhanced:
+                            ++enhancedFormatCount;
+                            break;
+
+                        case ContentSpecIdFormat.ElaV1:
+                        case ContentSpecIdFormat.MathV4:
+                        case ContentSpecIdFormat.MathV5:
+                        case ContentSpecIdFormat.MathV6:
+                            ++legacyFormatCount;
+                            break;
+
+                        default:
+                            ++errorCount;
+                            break;
+                    }
                 }
             }
 
             // Report results
             Console.WriteLine($"{idCount,4} Ids Tested");
+            Console.WriteLine($"{enhancedFormatCount,4} Enhanced Ids");
+            Console.WriteLine($"{legacyFormatCount,4} Legacy Ids");
             Console.WriteLine($"{errorCount,4} Errors Reported");
             Console.WriteLine();
 
             return errorCount == 0;
         }
 
-        static bool TestLegacyFormatId(string strGrade, string strId)
+        static ContentSpecIdFormat TestId(string strId, ContentSpecGrade defaultGrade)
         {
             try
             {
-                // Parse the grade and ID and check for errors
-                var grade = ContentSpecId.ParseGrade(strGrade);
-                var id = ContentSpecId.TryParse(strId, grade);
+                // Parse the ID and check for errors
+                var id = ContentSpecId.TryParse(strId, defaultGrade);
                 if (id.ParseErrorSeverity != ErrorSeverity.NoError)
                 {
                     // Report a parse error
-                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(strId);
                     WriteLine(id.ParseErrorSeverity == ErrorSeverity.Corrected ? ConsoleColor.Green : ConsoleColor.Red,
                         $"   {id.ParseErrorDescription}");
-                    return false;
+                    return ContentSpecIdFormat.Unknown;
                 }
 
                 // Check for format-ability
                 if (id.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
                 {
                     // Report a validation error
+                    WriteLine(strId);
                     WriteLine(ConsoleColor.Red, $"   {id.ValidationErrorDescription}");
-                    return false;
+                    return ContentSpecIdFormat.Unknown;
                 }
+
+                // Make sure the comparison ID has grade in it
+                string compId = (id.ParseFormat != ContentSpecIdFormat.Enhanced)
+                    ? RemedyMissingGrade(strId, defaultGrade)
+                    : strId;
 
                 // Check for round-trip match
                 string roundTrip = id.ToString();
-                string compId = RemedyMissingGrade(strId, grade);
                 if (!string.Equals(compId, roundTrip, StringComparison.OrdinalIgnoreCase))
                 {
-                    WriteLine($"{strGrade} {strId}");
+                    WriteLine(strId);
                     WriteLine(ConsoleColor.Red, $"   ID doesn't match: {roundTrip}");
-                    return false;
+                    return ContentSpecIdFormat.Unknown;
                 }
 
-                // See if can be reformatted to enhanced
-                if (id.ValidateFor(ContentSpecIdFormat.Enhanced) != ErrorSeverity.NoError)
+                // If claim or target is not specfied then it cannot be converted to
+                // legacy format. Do not perform the test.
+                if (id.ParseFormat == ContentSpecIdFormat.Enhanced
+                    && (id.Claim == ContentSpecClaim.Unspecified || string.IsNullOrEmpty(id.Target)))
+                    return id.ParseFormat;
+
+                // Format legacy as enhnaced and enhanced as legacy
+                ContentSpecIdFormat convertFormat;
+                switch (id.ParseFormat)
                 {
-                    WriteLine($"{strGrade} {strId}");
-                    WriteLine(ConsoleColor.Red, $"   Cannot convert to enhanced format: {id.ValidationErrorDescription}");
-                    return false;
+                    case ContentSpecIdFormat.ElaV1:
+                    case ContentSpecIdFormat.MathV4:
+                    case ContentSpecIdFormat.MathV5:
+                    case ContentSpecIdFormat.MathV6:
+                        convertFormat = ContentSpecIdFormat.Enhanced;
+                        break;
+
+                    case ContentSpecIdFormat.Enhanced:
+                        switch (id.Subject)
+                        {
+                            case ContentSpecSubject.ELA:
+                                convertFormat = ContentSpecIdFormat.ElaV1;
+                                break;
+
+                            case ContentSpecSubject.Math:
+                                convertFormat = ContentSpecIdFormat.MathV4;
+                                break;
+
+                            default:
+                                throw new ApplicationException("Unexpected subject.");
+                        }
+                        break;
+
+                    default:
+                        throw new ApplicationException("Unexpected format.");
                 }
 
-                // Round-trip through Enhanced ID format
-                var enhancedIdStr = id.ToString(ContentSpecIdFormat.Enhanced);
-                var enhancedId = ContentSpecId.TryParse(enhancedIdStr);
-                if (!enhancedId.ParseSucceeded)
+                // See if can be reformatted to target format
+                if (id.ValidateFor(convertFormat) != ErrorSeverity.NoError)
                 {
-                    WriteLine($"{strGrade} {strId}");
-                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
-                    WriteLine(ConsoleColor.Red, $"   Failed to parse enhanced format: {enhancedId.ParseErrorDescription}");
-                    return false;
+                    WriteLine(strId);
+                    WriteLine(ConsoleColor.Red, $"   Cannot convert from '{id.ParseFormat} to '{convertFormat}': {id.ValidationErrorDescription}");
+                    return ContentSpecIdFormat.Unknown;
                 }
 
-                if (!id.Equals(enhancedId))
+                // Round-trip through conversion format
+                var convertedIdStr = id.ToString(convertFormat);
+                var convertedId = ContentSpecId.TryParse(convertedIdStr);
+                if (!convertedId.ParseSucceeded)
                 {
-                    WriteLine($"{strGrade} {strId}");
-                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
-                    WriteLine(ConsoleColor.Red, $"   Enhanced ID conversion is not equal.");
-                    return false;
+                    WriteLine(strId);
+                    WriteLine(ConsoleColor.Red, $"   {convertedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Failed to parse converted format: {convertedId.ParseErrorDescription}");
+                    return ContentSpecIdFormat.Unknown;
                 }
 
-                if (enhancedId.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
+                if (!id.Equals(convertedId))
                 {
-                    WriteLine($"{strGrade} {strId}");
-                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
-                    WriteLine(ConsoleColor.Red, $"   Cannot format enhanced to original format: ${enhancedId.ValidationErrorDescription}");
-                    return false;
+                    WriteLine(strId);
+                    WriteLine(ConsoleColor.Red, $"   {convertedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Converted ID is not equal to original.");
+                    return ContentSpecIdFormat.Unknown;
                 }
 
-                roundTrip = enhancedId.ToString(id.ParseFormat);
+                if (convertedId.ValidateFor(id.ParseFormat) != ErrorSeverity.NoError)
+                {
+                    WriteLine(strId);
+                    WriteLine(ConsoleColor.Red, $"   {convertedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   Cannot convert from '{convertedId.ParseFormat}'to original '{id.ParseFormat}': ${convertedId.ValidationErrorDescription}");
+                    return ContentSpecIdFormat.Unknown;
+                }
+
+                roundTrip = convertedId.ToString(id.ParseFormat);
                 if (!string.Equals(compId, roundTrip, StringComparison.OrdinalIgnoreCase))
                 {
-                    WriteLine($"{strGrade} {strId}");
-                    WriteLine(ConsoleColor.Red, $"   {enhancedIdStr}");
-                    WriteLine(ConsoleColor.Red, $"   ID doesn't match when round-tripped through enahcned ID: {roundTrip}");
-                    return false;
+                    WriteLine(strId);
+                    WriteLine(ConsoleColor.Red, $"   {convertedIdStr}");
+                    WriteLine(ConsoleColor.Red, $"   ID doesn't match when round-tripped through alternative format: {roundTrip}");
+                    return ContentSpecIdFormat.Unknown;
                 }
+
+                return id.ParseFormat;
             }
             catch (Exception)
             {
-                WriteLine(ConsoleColor.Red, $"{strGrade} {strId}");
+                WriteLine(ConsoleColor.Red, strId);
                 throw;
             }
-
-            return true;
         }
 
         static bool TestEnhancedFormatIds(string path)
@@ -352,11 +425,11 @@ namespace UnitTest
             return string.Join('|', parts);
         }
 
-        static void DumpTargetSets()
+        static void DumpTargetSets(string filename)
         {
             int[,] targetSets = new int[13, 16];
 
-            using (var idFile = new StreamReader(Path.Combine(s_workingDirectory, c_legacyIdFilename)))
+            using (var idFile = new StreamReader(Path.Combine(s_workingDirectory, filename)))
             {
                 for (; ; )
                 {
@@ -407,12 +480,12 @@ namespace UnitTest
             }
         }
 
-        static void DumpEmphasis()
+        static void DumpEmphasis(string filename)
         {
             int[,] emphasisPrimary = new int[13, 16];
             int[,] emphasisCount = new int[13, 16];
 
-            using (var idFile = new StreamReader(Path.Combine(s_workingDirectory, c_legacyIdFilename)))
+            using (var idFile = new StreamReader(Path.Combine(s_workingDirectory, filename)))
             {
                 for (; ; )
                 {
@@ -488,11 +561,11 @@ namespace UnitTest
             }
         }
 
-        static void DumpHighSchoolDomains()
+        static void DumpHighSchoolDomains(string filename)
         {
             string[] domains = new string[16];
 
-            using (var idFile = new StreamReader(Path.Combine(s_workingDirectory, c_legacyIdFilename)))
+            using (var idFile = new StreamReader(Path.Combine(s_workingDirectory, filename)))
             {
                 for (; ; )
                 {
@@ -548,7 +621,7 @@ namespace UnitTest
 
         }
 
-        static void Test1()
+        static void Test1(string filename)
         {
             string workingDirectory = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
 
@@ -558,7 +631,7 @@ namespace UnitTest
 
             int[,] targetSets = new int[13, 16];
 
-            using (var idFile = new StreamReader(Path.Combine(workingDirectory, c_legacyIdFilename)))
+            using (var idFile = new StreamReader(Path.Combine(workingDirectory, filename)))
             {
                 for (; ; )
                 {
